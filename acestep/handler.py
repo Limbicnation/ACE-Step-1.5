@@ -178,7 +178,7 @@ class AceStepHandler:
             return (
                 f"❌ LoRA loading is not supported on quantized models. "
                 f"Current quantization: {self.quantization}. "
-                "Please re-initialize the service with quantization disabled (set quantization to 'None' in the UI), then try loading the LoRA adapter again."
+                "Please re-initialize the service with quantization disabled, then try loading the LoRA adapter again."
             )
         
         if not lora_path or not lora_path.strip():
