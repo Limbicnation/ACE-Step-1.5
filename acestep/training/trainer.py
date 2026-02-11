@@ -148,7 +148,11 @@ class PreprocessedLoRAModule(nn.Module):
         # Store training losses
         self.training_losses = []
     
-    def training_step(self, batch: Dict[str, torch.Tensor]) -> torch.Tensor:
+    def training_step(
+        self,
+        batch: Dict[str, torch.Tensor],
+        record_loss: bool = True,
+    ) -> torch.Tensor:
         """Single training step using preprocessed tensors.
         
         Note: This is a distilled turbo model, NO CFG is used.
@@ -160,6 +164,7 @@ class PreprocessedLoRAModule(nn.Module):
                 - encoder_hidden_states: [B, L, D] - Condition encoder output
                 - encoder_attention_mask: [B, L] - Condition mask
                 - context_latents: [B, T, 128] - Source context
+            record_loss: If True, append loss to training_losses (set False for validation).
             
         Returns:
             Loss tensor (float32 for stable backward)
@@ -218,7 +223,8 @@ class PreprocessedLoRAModule(nn.Module):
         # Convert loss to float32 for stable backward pass
         diffusion_loss = diffusion_loss.float()
         
-        self.training_losses.append(diffusion_loss.item())
+        if record_loss:
+            self.training_losses.append(diffusion_loss.item())
         
         return diffusion_loss
 
@@ -316,6 +322,7 @@ class LoRATrainer:
                 prefetch_factor=self.training_config.prefetch_factor,
                 persistent_workers=self.training_config.persistent_workers,
                 pin_memory_device=self.training_config.pin_memory_device,
+                val_split=getattr(self.training_config, "val_split", 0.0),
             )
             
             # Setup data
@@ -375,9 +382,22 @@ class LoRATrainer:
         
         yield 0, 0.0, f"🚀 Starting training (device: {device_type}, precision: {precision})..."
         
-        # Get dataloader
+        # Get dataloaders
         train_loader = data_module.train_dataloader()
-        
+        val_loader = data_module.val_dataloader() if hasattr(data_module, "val_dataloader") else None
+
+        if training_state is not None:
+            training_state["plot_steps"] = []
+            training_state["plot_loss"] = []
+            training_state["plot_ema"] = []
+            training_state["plot_val_steps"] = []
+            training_state["plot_val_loss"] = []
+            training_state["plot_best_step"] = None
+        ema_loss = None
+        ema_alpha = 0.1
+        best_val_loss = float("inf")
+        best_val_step = None
+
         # Setup optimizer - only LoRA parameters
         trainable_params = [p for p in self.module.model.parameters() if p.requires_grad]
         
@@ -532,6 +552,14 @@ class LoRATrainer:
                     # Log
                     avg_loss = accumulated_loss / accumulation_step
                     if global_step % self.training_config.log_every_n_steps == 0:
+                        if training_state is not None:
+                            if ema_loss is None:
+                                ema_loss = avg_loss
+                            else:
+                                ema_loss = ema_alpha * avg_loss + (1 - ema_alpha) * ema_loss
+                            training_state["plot_steps"].append(global_step)
+                            training_state["plot_loss"].append(avg_loss)
+                            training_state["plot_ema"].append(ema_loss)
                         self.fabric.log("train/loss", avg_loss, step=global_step)
                         self.fabric.log("train/lr", scheduler.get_last_lr()[0], step=global_step)
                         yield global_step, avg_loss, f"Epoch {epoch+1}/{self.training_config.max_epochs}, Step {global_step}, Loss: {avg_loss:.4f}"
@@ -557,6 +585,14 @@ class LoRATrainer:
                 global_step += 1
                 avg_loss = accumulated_loss / accumulation_step
                 if global_step % self.training_config.log_every_n_steps == 0:
+                    if training_state is not None:
+                        if ema_loss is None:
+                            ema_loss = avg_loss
+                        else:
+                            ema_loss = ema_alpha * avg_loss + (1 - ema_alpha) * ema_loss
+                        training_state["plot_steps"].append(global_step)
+                        training_state["plot_loss"].append(avg_loss)
+                        training_state["plot_ema"].append(ema_loss)
                     self.fabric.log("train/loss", avg_loss, step=global_step)
                     self.fabric.log("train/lr", scheduler.get_last_lr()[0], step=global_step)
                     yield global_step, avg_loss, f"Epoch {epoch+1}/{self.training_config.max_epochs}, Step {global_step}, Loss: {avg_loss:.4f}"
@@ -569,9 +605,49 @@ class LoRATrainer:
             # End of epoch
             epoch_time = time.time() - epoch_start_time
             avg_epoch_loss = epoch_loss / max(num_updates, 1)
-            
+            if training_state is not None:
+                if ema_loss is None:
+                    ema_loss = avg_epoch_loss
+                else:
+                    ema_loss = ema_alpha * avg_epoch_loss + (1 - ema_alpha) * ema_loss
+                # Avoid duplicating the last step if it was already logged in the batch loop
+                plot_steps = training_state["plot_steps"]
+                if not plot_steps or plot_steps[-1] != global_step:
+                    training_state["plot_steps"].append(global_step)
+                    training_state["plot_loss"].append(avg_epoch_loss)
+                    training_state["plot_ema"].append(ema_loss)
             self.fabric.log("train/epoch_loss", avg_epoch_loss, step=epoch + 1)
             yield global_step, avg_epoch_loss, f"✅ Epoch {epoch+1}/{self.training_config.max_epochs} in {epoch_time:.1f}s, Loss: {avg_epoch_loss:.4f}"
+
+            # Validation and best checkpoint (if validation set exists)
+            if val_loader is not None:
+                self.module.model.decoder.eval()
+                total_val_loss = 0.0
+                n_val = 0
+                with torch.no_grad():
+                    for val_batch in val_loader:
+                        v_loss = self.module.training_step(val_batch, record_loss=False)
+                        total_val_loss += v_loss.item()
+                        n_val += 1
+                self.module.model.decoder.train()
+                val_loss = total_val_loss / max(n_val, 1)
+                if training_state is not None:
+                    training_state["plot_val_steps"].append(global_step)
+                    training_state["plot_val_loss"].append(val_loss)
+                if val_loss < best_val_loss:
+                    best_val_loss = val_loss
+                    best_val_step = global_step
+                    if training_state is not None:
+                        training_state["plot_best_step"] = best_val_step
+                    best_dir = os.path.join(self.training_config.output_dir, "checkpoints", "best")
+                    save_training_checkpoint(
+                        self.module.model,
+                        optimizer,
+                        scheduler,
+                        epoch + 1,
+                        global_step,
+                        best_dir,
+                    )
             
             # Save checkpoint
             if (epoch + 1) % self.training_config.save_every_n_epochs == 0:

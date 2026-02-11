@@ -9,6 +9,9 @@ import json
 from typing import Any, Dict, List, Tuple, Optional
 from loguru import logger
 import gradio as gr
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
 
 from acestep.training.dataset_builder import DatasetBuilder, AudioSample
 from acestep.debug_utils import debug_log_for, debug_start_for, debug_end_for
@@ -515,6 +518,43 @@ def _format_duration(seconds):
         return f"{seconds // 3600}h {(seconds % 3600) // 60}m"
 
 
+def _training_loss_figure(
+    training_state: Dict,
+    step_list: List[int],
+    loss_list: List[float],
+) -> Optional[Any]:
+    """Build a training/validation loss plot (matplotlib Figure) for gr.Plot."""
+    steps = training_state.get("plot_steps") or step_list
+    loss = training_state.get("plot_loss") or loss_list
+    if not steps or not loss:
+        fig, ax = plt.subplots(figsize=(6, 3))
+        ax.set_xlabel("Step")
+        ax.set_ylabel("Loss")
+        ax.set_title("Training loss")
+        fig.tight_layout()
+        return fig
+    ema = training_state.get("plot_ema")
+    val_steps = training_state.get("plot_val_steps") or []
+    val_loss = training_state.get("plot_val_loss") or []
+    best_step = training_state.get("plot_best_step")
+
+    fig, ax = plt.subplots(figsize=(6, 3))
+    ax.plot(steps, loss, color="tab:blue", alpha=0.35, label="Loss (raw)", linewidth=1)
+    if ema and len(ema) == len(steps):
+        ax.plot(steps, ema, color="tab:blue", alpha=1.0, label="Loss (smoothed)", linewidth=1.5)
+    if val_steps and val_loss:
+        ax.scatter(val_steps, val_loss, color="tab:orange", s=24, zorder=5, label="Validation")
+    if best_step is not None:
+        ax.axvline(x=best_step, color="tab:green", linestyle="--", alpha=0.8, label="Best checkpoint")
+    ax.set_xlabel("Step")
+    ax.set_ylabel("Loss")
+    ax.set_title("Training loss")
+    ax.legend(loc="upper right", fontsize=8)
+    ax.grid(True, alpha=0.3)
+    fig.tight_layout()
+    return fig
+
+
 def start_training(
     tensor_dir: str,
     dit_handler,
@@ -663,16 +703,16 @@ def start_training(
             mixed_precision=mixed_precision,
         )
         
-        import pandas as pd
-        
         # Initialize training log and loss history
         log_lines = []
-        loss_data = pd.DataFrame({"step": [0], "loss": [0.0]})
+        step_list = []
+        loss_list = []
+        initial_plot = _training_loss_figure(training_state, step_list, loss_list)
         
         # Start timer
         start_time = time.time()
         
-        yield f"� Starting training from {tensor_dir}...", "", loss_data, training_state
+        yield f"� Starting training from {tensor_dir}...", "", initial_plot, training_state
         
         # Create trainer
         trainer = LoRATrainer(
@@ -681,9 +721,6 @@ def start_training(
             training_config=training_config,
         )
         
-        # Collect loss history
-        step_list = []
-        loss_list = []
         training_failed = False
         failure_message = ""
         
@@ -731,37 +768,36 @@ def start_training(
             if step > 0 and loss is not None and loss == loss:  # Check for NaN
                 step_list.append(step)
                 loss_list.append(float(loss))
-                loss_data = pd.DataFrame({"step": step_list, "loss": loss_list})
             
-            yield display_status, log_text, loss_data, training_state
+            plot_figure = _training_loss_figure(training_state, step_list, loss_list)
+            yield display_status, log_text, plot_figure, training_state
             
             if training_state.get("should_stop", False):
                 logger.info("⏹️ Training stopped by user")
                 log_lines.append("⏹️ Training stopped by user")
-                yield f"⏹️ Stopped ({time_info})", "\n".join(log_lines[-15:]), loss_data, training_state
+                yield f"⏹️ Stopped ({time_info})", "\n".join(log_lines[-15:]), plot_figure, training_state
                 break
         
         total_time = time.time() - start_time
         training_state["is_training"] = False
+        final_plot = _training_loss_figure(training_state, step_list, loss_list)
         if training_failed:
             final_msg = f"{failure_message}\nElapsed: {_format_duration(total_time)}"
             logger.warning(final_msg)
             log_lines.append(failure_message)
-            yield final_msg, "\n".join(log_lines[-15:]), loss_data, training_state
+            yield final_msg, "\n".join(log_lines[-15:]), final_plot, training_state
             return
         completion_msg = f"� Training completed! Total time: {_format_duration(total_time)}"
         
         logger.info(completion_msg)
         log_lines.append(completion_msg)
         
-        yield completion_msg, "\n".join(log_lines[-15:]), loss_data, training_state
+        yield completion_msg, "\n".join(log_lines[-15:]), final_plot, training_state
         
     except Exception as e:
         logger.exception("Training error")
         training_state["is_training"] = False
-        import pandas as pd
-        empty_df = pd.DataFrame({"step": [], "loss": []})
-        yield f"� Error: {str(e)}", str(e), empty_df, training_state
+        yield f"� Error: {str(e)}", str(e), _training_loss_figure({}, [], []), training_state
 
 
 def stop_training(training_state: Dict) -> Tuple[str, Dict]:
