@@ -44,6 +44,7 @@ from acestep.constants import (
     SFT_GEN_PROMPT,
     DEFAULT_DIT_INSTRUCTION,
 )
+from acestep.core.generation.handler import LoraManagerMixin, ProgressMixin
 from acestep.dit_alignment_score import MusicStampsAligner, MusicLyricScorer
 from acestep.gpu_config import get_gpu_memory_gb, get_global_gpu_config
 
@@ -51,7 +52,7 @@ from acestep.gpu_config import get_gpu_memory_gb, get_global_gpu_config
 warnings.filterwarnings("ignore")
 
 
-class AceStepHandler:
+class AceStepHandler(LoraManagerMixin, ProgressMixin):
     """ACE-Step Business Logic Handler"""
     
     def __init__(self):
@@ -108,6 +109,8 @@ class AceStepHandler:
         self.use_lora = False
         self.lora_scale = 1.0  # LoRA influence scale (0-1)
         self._base_decoder = None  # Backup of original decoder
+        self._lora_adapter_registry = {}  # adapter_name -> explicit scaling targets
+        self._lora_active_adapter = None
     
     def get_available_checkpoints(self) -> str:
         """Return project root directory path"""
@@ -159,205 +162,6 @@ class AceStepHandler:
         if self.config is None:
             return False
         return getattr(self.config, 'is_turbo', False)
-    
-    def load_lora(self, lora_path: str) -> str:
-        """Load LoRA adapter into the decoder.
-        
-        Args:
-            lora_path: Path to the LoRA adapter directory (containing adapter_config.json)
-            
-        Returns:
-            Status message
-        """
-        if self.model is None:
-            return "❌ Model not initialized. Please initialize service first."
-        
-        # Check if model is quantized - LoRA loading on quantized models is not supported
-        # due to incompatibility between PEFT and torchao (missing get_apply_tensor_subclass argument)
-        if self.quantization is not None:
-            return (
-                f"❌ LoRA loading is not supported on quantized models. "
-                f"Current quantization: {self.quantization}. "
-                "Please re-initialize the service with quantization disabled, then try loading the LoRA adapter again."
-            )
-        
-        if not lora_path or not lora_path.strip():
-            return "❌ Please provide a LoRA path."
-        
-        lora_path = lora_path.strip()
-        
-        # Check if path exists
-        if not os.path.exists(lora_path):
-            return f"❌ LoRA path not found: {lora_path}"
-        
-        # Check if it's a valid PEFT adapter directory
-        config_file = os.path.join(lora_path, "adapter_config.json")
-        if not os.path.exists(config_file):
-            return f"❌ Invalid LoRA adapter: adapter_config.json not found in {lora_path}"
-        
-        try:
-            from peft import PeftModel, PeftConfig
-        except ImportError:
-            return "❌ PEFT library not installed. Please install with: pip install peft"
-        
-        try:
-            import copy
-            # Backup base decoder if not already backed up
-            if self._base_decoder is None:
-                self._base_decoder = copy.deepcopy(self.model.decoder)
-                logger.info("Base decoder backed up")
-            else:
-                # Restore base decoder before loading new LoRA
-                self.model.decoder = copy.deepcopy(self._base_decoder)
-                logger.info("Restored base decoder before loading new LoRA")
-            
-            # Load PEFT adapter
-            logger.info(f"Loading LoRA adapter from {lora_path}")
-            self.model.decoder = PeftModel.from_pretrained(
-                self.model.decoder,
-                lora_path,
-                is_trainable=False,
-            )
-            self.model.decoder = self.model.decoder.to(self.device).to(self.dtype)
-            self.model.decoder.eval()
-            
-            self.lora_loaded = True
-            self.use_lora = True  # Enable LoRA by default after loading
-            
-            logger.info(f"LoRA adapter loaded successfully from {lora_path}")
-            return f"✅ LoRA loaded from {lora_path}"
-            
-        except Exception as e:
-            logger.exception("Failed to load LoRA adapter")
-            return f"❌ Failed to load LoRA: {str(e)}"
-    
-    def unload_lora(self) -> str:
-        """Unload LoRA adapter and restore base decoder.
-        
-        Returns:
-            Status message
-        """
-        if not self.lora_loaded:
-            return "⚠️ No LoRA adapter loaded."
-        
-        if self._base_decoder is None:
-            return "❌ Base decoder backup not found. Cannot restore."
-        
-        try:
-            import copy
-            # Restore base decoder
-            self.model.decoder = copy.deepcopy(self._base_decoder)
-            self.model.decoder = self.model.decoder.to(self.device).to(self.dtype)
-            self.model.decoder.eval()
-            
-            self.lora_loaded = False
-            self.use_lora = False
-            self.lora_scale = 1.0  # Reset scale to default
-            
-            logger.info("LoRA unloaded, base decoder restored")
-            return "✅ LoRA unloaded, using base model"
-            
-        except Exception as e:
-            logger.exception("Failed to unload LoRA")
-            return f"❌ Failed to unload LoRA: {str(e)}"
-    
-    def set_use_lora(self, use_lora: bool) -> str:
-        """Toggle LoRA usage for inference.
-        
-        Args:
-            use_lora: Whether to use LoRA adapter
-            
-        Returns:
-            Status message
-        """
-        if use_lora and not self.lora_loaded:
-            return "❌ No LoRA adapter loaded. Please load a LoRA first."
-        
-        self.use_lora = use_lora
-        
-        # Use PEFT's enable/disable methods if available
-        if self.lora_loaded and hasattr(self.model.decoder, 'disable_adapter_layers'):
-            try:
-                if use_lora:
-                    self.model.decoder.enable_adapter_layers()
-                    logger.info("LoRA adapter enabled")
-                    # Apply current scale when enabling LoRA
-                    if self.lora_scale != 1.0:
-                        self.set_lora_scale(self.lora_scale)
-                else:
-                    self.model.decoder.disable_adapter_layers()
-                    logger.info("LoRA adapter disabled")
-            except Exception as e:
-                logger.warning(f"Could not toggle adapter layers: {e}")
-        
-        status = "enabled" if use_lora else "disabled"
-        return f"✅ LoRA {status}"
-    
-    def set_lora_scale(self, scale: float) -> str:
-        """Set LoRA adapter scale/weight (0-1 range).
-        
-        Args:
-            scale: LoRA influence scale (0=disabled, 1=full effect)
-            
-        Returns:
-            Status message
-        """
-        if not self.lora_loaded:
-            return "⚠️ No LoRA loaded"
-        
-        # Clamp scale to 0-1 range
-        self.lora_scale = max(0.0, min(1.0, scale))
-        
-        # Only apply scaling if LoRA is enabled
-        if not self.use_lora:
-            logger.info(f"LoRA scale set to {self.lora_scale:.2f} (will apply when LoRA is enabled)")
-            return f"✅ LoRA scale: {self.lora_scale:.2f} (LoRA disabled)"
-        
-        # Iterate through LoRA layers only and set their scaling
-        try:
-            modified_count = 0
-            for name, module in self.model.decoder.named_modules():
-                # Only modify LoRA modules - they have 'lora_' in their name
-                # This prevents modifying attention scaling and other non-LoRA modules
-                if 'lora_' in name and hasattr(module, 'scaling'):
-                    scaling = module.scaling
-                    # Handle dict-style scaling (adapter_name -> value)
-                    if isinstance(scaling, dict):
-                        # Save original scaling on first call
-                        if not hasattr(module, '_original_scaling'):
-                            module._original_scaling = {k: v for k, v in scaling.items()}
-                        # Apply new scale
-                        for adapter_name in scaling:
-                            module.scaling[adapter_name] = module._original_scaling[adapter_name] * self.lora_scale
-                        modified_count += 1
-                    # Handle float-style scaling (single value)
-                    elif isinstance(scaling, (int, float)):
-                        if not hasattr(module, '_original_scaling'):
-                            module._original_scaling = scaling
-                        module.scaling = module._original_scaling * self.lora_scale
-                        modified_count += 1
-            
-            if modified_count > 0:
-                logger.info(f"LoRA scale set to {self.lora_scale:.2f} (modified {modified_count} modules)")
-                return f"✅ LoRA scale: {self.lora_scale:.2f}"
-            else:
-                logger.warning("No LoRA scaling attributes found to modify")
-                return f"⚠️ Scale set to {self.lora_scale:.2f} (no modules found)"
-        except Exception as e:
-            logger.warning(f"Could not set LoRA scale: {e}")
-            return f"⚠️ Scale set to {self.lora_scale:.2f} (partial)"
-    
-    def get_lora_status(self) -> Dict[str, Any]:
-        """Get current LoRA status.
-        
-        Returns:
-            Dictionary with LoRA status info
-        """
-        return {
-            "loaded": self.lora_loaded,
-            "active": self.use_lora,
-            "scale": self.lora_scale,
-        }
     
     def initialize_service(
         self,
@@ -1334,126 +1138,6 @@ class AceStepHandler:
     def is_silence(self, audio):
         return torch.all(audio.abs() < 1e-6)
     
-    def _get_project_root(self) -> str:
-        """Get project root directory path."""
-        current_file = os.path.abspath(__file__)
-        return os.path.dirname(os.path.dirname(current_file))
-
-    def _load_progress_estimates(self) -> None:
-        """Load persisted diffusion progress estimates if available."""
-        try:
-            if os.path.exists(self._progress_estimates_path):
-                with open(self._progress_estimates_path, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                    if isinstance(data, dict) and isinstance(data.get("records"), list):
-                        self._progress_estimates = data
-        except Exception:
-            # Ignore corrupted cache; it will be overwritten on next save.
-            self._progress_estimates = {"records": []}
-
-    def _save_progress_estimates(self) -> None:
-        """Persist diffusion progress estimates."""
-        try:
-            os.makedirs(os.path.dirname(self._progress_estimates_path), exist_ok=True)
-            with open(self._progress_estimates_path, "w", encoding="utf-8") as f:
-                json.dump(self._progress_estimates, f)
-        except Exception:
-            pass
-
-    def _duration_bucket(self, duration_sec: Optional[float]) -> str:
-        if duration_sec is None or duration_sec <= 0:
-            return "unknown"
-        if duration_sec <= 60:
-            return "short"
-        if duration_sec <= 180:
-            return "medium"
-        if duration_sec <= 360:
-            return "long"
-        return "xlong"
-
-    def _update_progress_estimate(
-        self,
-        per_step_sec: float,
-        infer_steps: int,
-        batch_size: int,
-        duration_sec: Optional[float],
-    ) -> None:
-        if per_step_sec <= 0 or infer_steps <= 0:
-            return
-        record = {
-            "device": self.device,
-            "infer_steps": int(infer_steps),
-            "batch_size": int(batch_size),
-            "duration_sec": float(duration_sec) if duration_sec and duration_sec > 0 else None,
-            "duration_bucket": self._duration_bucket(duration_sec),
-            "per_step_sec": float(per_step_sec),
-            "updated_at": time.time(),
-        }
-        with self._progress_estimates_lock:
-            records = self._progress_estimates.get("records", [])
-            records.append(record)
-            # Keep recent 100 records
-            records = records[-100:]
-            self._progress_estimates["records"] = records
-            self._progress_estimates["updated_at"] = time.time()
-            self._save_progress_estimates()
-
-    def _estimate_diffusion_per_step(
-        self,
-        infer_steps: int,
-        batch_size: int,
-        duration_sec: Optional[float],
-    ) -> Optional[float]:
-        # Prefer most recent exact-ish record
-        target_bucket = self._duration_bucket(duration_sec)
-        with self._progress_estimates_lock:
-            records = list(self._progress_estimates.get("records", []))
-        if not records:
-            return None
-
-        # Filter by device first
-        device_records = [r for r in records if r.get("device") == self.device] or records
-
-        # Exact match by steps/batch/bucket
-        for r in reversed(device_records):
-            if (
-                r.get("infer_steps") == infer_steps
-                and r.get("batch_size") == batch_size
-                and r.get("duration_bucket") == target_bucket
-            ):
-                return r.get("per_step_sec")
-
-        # Same steps + bucket, scale by batch and duration when possible
-        for r in reversed(device_records):
-            if r.get("infer_steps") == infer_steps and r.get("duration_bucket") == target_bucket:
-                base = r.get("per_step_sec")
-                base_batch = r.get("batch_size", batch_size)
-                base_dur = r.get("duration_sec")
-                if base and base_batch:
-                    est = base * (batch_size / base_batch)
-                    if duration_sec and base_dur:
-                        est *= (duration_sec / base_dur)
-                    return est
-
-        # Same steps, scale by batch and duration ratio if available
-        for r in reversed(device_records):
-            if r.get("infer_steps") == infer_steps:
-                base = r.get("per_step_sec")
-                base_batch = r.get("batch_size", batch_size)
-                base_dur = r.get("duration_sec")
-                if base and base_batch:
-                    est = base * (batch_size / base_batch)
-                    if duration_sec and base_dur:
-                        est *= (duration_sec / base_dur)
-                    return est
-
-        # Fallback to global median
-        per_steps = [r.get("per_step_sec") for r in device_records if r.get("per_step_sec")]
-        if per_steps:
-            per_steps.sort()
-            return per_steps[len(per_steps) // 2]
-        return None
-
     def _empty_cache(self) -> None:
         """Clear device cache to reduce peak memory usage."""
         if self.device.startswith("cuda") and torch.cuda.is_available():
@@ -1516,47 +1200,6 @@ class AceStepHandler:
             return False
         return True
 
-    def _start_diffusion_progress_estimator(
-        self,
-        progress,
-        start: float,
-        end: float,
-        infer_steps: int,
-        batch_size: int,
-        duration_sec: Optional[float],
-        desc: str,
-    ):
-        """Best-effort progress updates during diffusion using previous step timing."""
-        if progress is None or infer_steps <= 0:
-            return None, None
-        per_step = self._estimate_diffusion_per_step(
-            infer_steps=infer_steps,
-            batch_size=batch_size,
-            duration_sec=duration_sec,
-        ) or self._last_diffusion_per_step_sec
-        if not per_step or per_step <= 0:
-            return None, None
-        expected = per_step * infer_steps
-        if expected <= 0:
-            return None, None
-        stop_event = threading.Event()
-
-        def _runner():
-            start_time = time.time()
-            while not stop_event.is_set():
-                elapsed = time.time() - start_time
-                frac = min(0.999, elapsed / expected)
-                value = start + (end - start) * frac
-                try:
-                    progress(value, desc=desc)
-                except Exception:
-                    pass
-                stop_event.wait(0.5)
-
-        thread = threading.Thread(target=_runner, name="diffusion-progress", daemon=True)
-        thread.start()
-        return stop_event, thread
-    
     def _get_vae_dtype(self, device: Optional[str] = None) -> torch.dtype:
         """Get VAE dtype based on target device and GPU tier."""
         target_device = device or self.device
