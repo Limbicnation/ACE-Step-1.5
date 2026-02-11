@@ -4,6 +4,8 @@ import types
 import unittest
 from unittest.mock import Mock, patch
 
+import torch
+
 from acestep.core.generation.handler.init_service import InitServiceMixin
 
 
@@ -18,6 +20,29 @@ class _Host(InitServiceMixin):
 
 
 class InitServiceMixinTests(unittest.TestCase):
+    def test_device_type_normalizes_device(self):
+        host = _Host(project_root="K:/fake_root", device="cuda:0")
+        self.assertEqual(host._device_type(), "cuda:0")
+
+    def test_is_on_target_device_handles_device_alias(self):
+        host = _Host(project_root="K:/fake_root", device="cpu")
+        t = types.SimpleNamespace(device=types.SimpleNamespace(type="cuda"))
+        self.assertTrue(host._is_on_target_device(t, "cuda:0"))
+        self.assertFalse(host._is_on_target_device(t, "cpu"))
+
+    def test_is_on_target_device_fallback_does_not_assume_cuda(self):
+        host = _Host(project_root="K:/fake_root", device="cpu")
+        t = types.SimpleNamespace(device=types.SimpleNamespace(type="cuda"))
+        self.assertFalse(host._is_on_target_device(t, "mps:0"))
+
+    def test_move_module_recursive_preserves_parameter_type(self):
+        host = _Host(project_root="K:/fake_root", device="cpu")
+        module = torch.nn.Linear(2, 2)
+        with patch.object(host, "_is_on_target_device", return_value=False):
+            host._move_module_recursive(module, "cpu")
+        self.assertIsInstance(module.weight, torch.nn.Parameter)
+        self.assertIsInstance(module.bias, torch.nn.Parameter)
+
     def test_get_available_checkpoints_returns_expected_list(self):
         host = _Host(project_root="K:/fake_root")
         with patch("os.path.exists", return_value=False):
