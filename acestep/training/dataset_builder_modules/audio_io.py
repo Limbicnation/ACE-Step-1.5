@@ -1,7 +1,6 @@
 import os
 from typing import Tuple
 
-import torchaudio
 from loguru import logger
 
 
@@ -47,11 +46,14 @@ def load_lyrics_file(audio_path: str) -> Tuple[str, bool]:
 
 def get_audio_duration(audio_path: str) -> int:
     """Get the duration of an audio file in seconds."""
+    # Primary: torchcodec (ships with torchaudio >=2.9, supports all ffmpeg formats)
     try:
-        info = torchaudio.info(audio_path)
-        return int(info.num_frames / info.sample_rate)
+        from torchcodec.decoders import AudioDecoder
+        decoder = AudioDecoder(audio_path)
+        return int(decoder.metadata.duration_seconds)
     except Exception as e:
-        logger.warning(f"torchaudio failed for {audio_path}: {e}, trying soundfile")
+        logger.debug(f"torchcodec failed for {audio_path}: {e}, trying soundfile")
+    # Fallback: soundfile (fast for wav/flac/ogg)
     try:
         import soundfile as sf
         info = sf.info(audio_path)
