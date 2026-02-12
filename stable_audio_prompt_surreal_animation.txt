@@ -1,0 +1,51 @@
+STABLE AUDIO PROMPT
+Generated: 2026-02-12
+Purpose: Abstract surreal Blender 3D animation (12 seconds)
+Reference: Screenshot from 2026-02-12 04-42-29.png
+
+================================================================================
+
+PRIMARY PROMPT (RECOMMENDED):
+
+Electronic psychedelic vaporwave | Hypnotic swirling synthesizers with kaleidoscopic arpeggios | Lush analog synth pads, modular synth sequences, glitchy textures, ethereal vocal chops, sub bass | Surreal, dreamlike, trippy, mesmerizing, otherworldly | 110 BPM | Y2K digital aesthetics, vaporwave movement, SOPHIE-influenced | Studio-quality, wide stereo image, reverb-drenched, prismatic production, immersive spatial design
+
+================================================================================
+
+NEGATIVE PROMPT:
+
+acoustic instruments, guitars, drums, rock elements, organic sounds, minimal production, lo-fi, muddy mix, harsh distortion, aggressive tones, silence, abrupt ending, generic EDM, cheesy presets
+
+================================================================================
+
+PARAMETER RECOMMENDATIONS:
+
+- Duration: 12 seconds (exact)
+- Variations: 3-4 generations to find best visual sync
+- Seed strategy: Random first, then fixed seed for variations
+- Post-processing: Manual fade-out in final 1-2 seconds for loop potential
+
+================================================================================
+
+ALTERNATIVE PROMPTS:
+
+OPTION 2 - MORE AMBIENT/ATMOSPHERIC:
+Ambient psychedelic soundscape | Evolving textural layers with cosmic resonance | Granular synthesis, reverb-soaked pads, crystalline bells, processed vocals, deep sub frequencies | Ethereal, surreal, floating, hypnotic | 90 BPM | Space ambient, Brian Eno-inspired, vapor aesthetic | Immersive, studio-quality, expansive stereo field
+
+OPTION 3 - MORE GLITCH/EXPERIMENTAL:
+Experimental glitch electronica | Fragmented modular synthesis with morphing timbres | Circuit-bent synths, bit-crushed arpeggios, glitch percussion, warped samples, filter sweeps | Psychedelic, abstract, uncanny, digital surrealism | 120 BPM | Autechre-influenced, IDM, glitch art aesthetic | Pristine digital production, crystalline clarity, spatial movement
+
+================================================================================
+
+AUDIO-VISUAL SYNC NOTES:
+
+Visual Elements → Sonic Translation:
+- Golden cubic voxels → Kaleidoscopic arpeggios, crystalline tones
+- Swirling cyan/magenta patterns → Hypnotic synthesizer sweeps
+- Purple grid platforms → Modular synth sequences, structured rhythm
+- Stone sculpture head → Ethereal vocal chops, processed vocals
+- Green glass tubes → Glitchy textures, prismatic effects
+- Dynamic camera movement → Spatial stereo design, evolving layers
+
+Quality Score: 9/10
+
+The primary prompt balances hypnotic vaporwave aesthetic with rhythmic energy to match your dynamic camera movement and maximalist composition.

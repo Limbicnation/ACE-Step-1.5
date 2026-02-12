@@ -1,0 +1,58 @@
+STABLE DIFFUSION ELITE PROMPT
+Generated: 2026-02-12
+Purpose: Abstract surreal Blender 3D animation (12 seconds)
+Reference: Screenshot from 2026-02-12 04-42-29.png
+
+================================================================================
+
+POSITIVE PROMPT:
+abstract surreal 3D animation, modular golden cubic voxel structures floating in psychedelic space, swirling hypnotic background with cyan and magenta concentric ripples, iridescent holographic waves, purple waffle-grid platforms with geometric perforations, ancient stone sculpture head with weathered texture, translucent green glass tubes and cylinders, volumetric god rays piercing through geometric forms, subsurface scattering on translucent materials, physically-based rendering, Blender Cycles ray tracing, dreamlike surrealist composition, Salvatore Dali meets digital baroque, kaleidoscopic color palette, neon pastels, depth of field with bokeh, dynamic camera movement, orbital rotation, 8K resolution, ultra-detailed micro-geometry, sharp focus on foreground elements, atmospheric depth, particle effects, chromatic aberration, bloom and lens flares, retro-futuristic CGI aesthetic, Y2K digital art style, maximalist composition, rule of thirds with golden ratio spiral, layered depth with foreground mid-ground background separation, studio lighting with rim lights, ambient occlusion, geometric abstraction, modular architecture, vaporwave aesthetics, glitch art influences
+
+================================================================================
+
+NEGATIVE PROMPT:
+photorealistic, boring composition, flat lighting, muddy colors, low resolution, blurry, soft focus, realistic textures, natural lighting, minimalist, monochrome, desaturated, dull, static camera, motion blur, compression artifacts, low poly, simple geometry, empty space, centered composition, symmetrical, conventional framing, amateur 3D, default materials, no atmosphere, harsh shadows, underexposed, overexposed, noise, grain, jpeg artifacts, watermark, text, signature
+
+================================================================================
+
+PROMPT BREAKDOWN:
+
+Subject Description:
+- Modular golden cubic voxel structures (main geometric elements)
+- Ancient stone sculpture head (surreal organic element)
+- Translucent green glass tubes (complementary shapes)
+- Purple waffle-grid platforms (architectural base)
+
+Composition & Framing:
+- Rule of thirds with golden ratio spiral
+- Layered depth (foreground/midground/background separation)
+- Dynamic camera movement with orbital rotation
+- Depth of field with bokeh effects
+
+Lighting & Atmosphere:
+- Studio lighting with rim lights
+- Volumetric god rays piercing geometry
+- Subsurface scattering on translucent materials
+- Bloom and lens flares for atmosphere
+- Ambient occlusion for depth
+
+Style & Technique:
+- Blender Cycles physically-based rendering
+- Dreamlike surrealist (Dali meets digital baroque)
+- Y2K digital art / vaporwave aesthetics
+- Glitch art influences
+- Retro-futuristic CGI
+
+Technical Quality:
+- 8K resolution, ultra-detailed micro-geometry
+- Sharp focus on foreground
+- Ray tracing with subsurface scattering
+- Chromatic aberration for realism
+- Particle effects for atmosphere
+
+Color Palette:
+- Psychedelic swirls (cyan, magenta, red)
+- Golden/yellow cubic structures
+- Purple geometric platforms
+- Green translucent elements
+- Neon pastels, kaleidoscopic, iridescent
